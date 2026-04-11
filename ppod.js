@@ -1,82 +1,81 @@
 const express = require("express");
-const test = require("node:test");
 const app = express();
 const { exec } = require("child_process");
+const crypto = require("crypto");
+// TODO:
+// 1. Set whitelist for github IP
+// 2. Prevent replay attacks
 
-app.use(express.raw({ type: "application/json" }));
+app.use(express.raw({ type: "application/json", limit: "1mb"}));
 
 // Load config
 process.loadEnvFile('./ppod.conf')
 
-async function HMAC(key, message) {
-  const enc = new TextEncoder();
 
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(key),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
 
-  const sig = await crypto.subtle.sign(
-    "HMAC",
-    cryptoKey,
-    enc.encode(message)
-  );
-
-  return [...new Uint8Array(sig)]
-    .map(b => b.toString(16).padStart(2, "0"))
-    .join("");
+function HMAC(key, message) {
+  return crypto
+    .createHmac("sha256", key)
+    .update(Buffer.isBuffer(message) ? message : Buffer.from(message))
+    .digest("hex");
 }
 
 async function checkKey(key, body, githubHash) {
-    generatedHash = await HMAC(key, body)
+    const generatedHash = await HMAC(key, body)
     console.log(generatedHash)
-    if (generatedHash == githubHash){
-        return true
-    }
-        
+
+    // Prevents timing attacks
+    return crypto.timingSafeEqual(
+        Buffer.from(generatedHash, "hex"),
+        Buffer.from(githubHash, "hex")
+    )
 }
 
 async function deployment(pathToScript) {
-    // console.log("test")
-    exec(pathToScript,
-    function (error, stdout, stderr) {
+    return new Promise((resolve, reject) => {
+        exec(pathToScript, function (error, stdout, stderr) {
+            // Only print if there is a need to
+            if (stdout){
+                console.log(stdout);
+            }
+            if (stderr){
+                console.log(stderr);
+            }
 
-        // Only print if there is a need to
-        if (stdout){
-            console.log(stdout);
-        }
-        if (stderr){
-            console.log(stderr);
-        }
-        
-        if (error !== null) {
-             console.log('exec error: ' + error);
-        }
+            if (error !== null) {
+                return reject(error);
+            }
+
+            resolve();
+        });
     });
-    
 }
 
 
-app.post("/webhook", (req, res) => {
+app.post("/webhook", async (req, res) => {
     console.log("got POST");
-    const body = req.body
-    console.log(body);
-    // Get the HASH
-    const hash = (req.headers["x-hub-signature-256"].substring(7));
-    console.log(hash)
 
-    // Check if the hash matches
-    if (checkKey(process.env.secret, body, hash)){
-        deployment(process.env.path_to_deployment_script)
+    try {
+        const body = req.body
+        const signatureHeader = req.headers["x-hub-signature-256"];
+
+        if (!signatureHeader || !signatureHeader.startsWith("sha256=")) {
+            return res.status(400).send("Missing or invalid signature header");
+        }
+
+        const hash = signatureHeader.substring(7);
+
+        // Check if the hash matches
+        if (await checkKey(process.env.secret, body, hash)){
+            await deployment(process.env.path_to_deployment_script)
+            return res.send("OK")
+        }
+
+        return res.status(401).send("Invalid signature")
+    } catch (error) {
+        console.error(error);
+        return res.status(500).send("Internal server error");
     }
-    
-
-
-
-    res.send("OK")
 })
 
 app.listen(process.env.port, () => {
