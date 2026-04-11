@@ -1,6 +1,9 @@
 # dependencies
 node_modules/
 
+# tests
+tests/
+
 # logs
 logs/
 *.log
