@@ -79,6 +79,6 @@ app.post("/webhook", (req, res) => {
     res.send("OK")
 })
 
-app.listen(8000, () => {
-    console.log("Server running on port 8000")
+app.listen(process.env.port, () => {
+    console.log(`Server running on port ${process.env.port}`)
 })
