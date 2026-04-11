@@ -2,16 +2,63 @@ const express = require("express");
 const app = express();
 const { exec } = require("child_process");
 const crypto = require("crypto");
+const fs = require("fs")
+
+// TODO: Replace with log file
+const pino = require("pino")
+const logger = pino({
+    formatters: {
+        level: (label) => ({ level: label.toUpperCase() })
+    }
+})
+
 // TODO:
 // 1. Set whitelist for github IP
 // 2. Prevent replay attacks
+// 3. Change file locations to proper locations
+
 
 app.use(express.raw({ type: "application/json", limit: "1mb"}));
 
+// Quit the program
+function die(deathMessage){
+    console.log("\x1b[31m%s\x1b[0m", `FATAL ERROR: ${deathMessage}`)
+    process.exit(1)
+}
 // Load config
-process.loadEnvFile('./ppod.conf')
+function loadConfig(configPath){
+    try{
+        process.loadEnvFile(configPath)
+    }
+    catch(error){
+        logger.fatal(error, "Missing config file")
+        die("Missing config file")
+    }
+    
+}
+loadConfig('./ppod.conf')
+// Load seen deliveries
+function loadDB(DBPath){
+    try{
+        return require(DBPath)
 
+    }
+    catch(error){
+        logger.fatal(error, "Fail to load DB")
+        die("Fail to load DB")
+    }
+}
 
+const DB_PATH = "./db.json";
+const db = loadDB(DB_PATH)
+
+if (!Array.isArray(db.seenDeliveries)) {
+    db.seenDeliveries = [];
+}
+
+function persistDB(DBPath, DBContent) {
+    fs.writeFileSync(DBPath, `${JSON.stringify(DBContent, null, 2)}\n`, "utf8");
+}
 
 function HMAC(key, message) {
   return crypto
@@ -22,7 +69,12 @@ function HMAC(key, message) {
 
 async function checkKey(key, body, githubHash) {
     const generatedHash = await HMAC(key, body)
-    console.log(generatedHash)
+    logger.info({ generatedHash }, "Generated webhook signature")
+
+    // Signatures should be 64-char hex for sha256.
+    if (!/^[a-fA-F0-9]{64}$/.test(githubHash)) {
+        return false;
+    }
 
     // Prevents timing attacks
     return crypto.timingSafeEqual(
@@ -36,13 +88,16 @@ async function deployment(pathToScript) {
         exec(pathToScript, function (error, stdout, stderr) {
             // Only print if there is a need to
             if (stdout){
-                console.log(stdout);
+                logger.info({ stdout: stdout.trim() }, "Deployment stdout");
+                console.log(stdout)
             }
             if (stderr){
-                console.log(stderr);
+                logger.warn({ stderr: stderr.trim() }, "Deployment stderr");
+                console.log(stderr)
             }
 
             if (error !== null) {
+                logger.error(error, "Deployment command failed");
                 return reject(error);
             }
 
@@ -51,33 +106,56 @@ async function deployment(pathToScript) {
     });
 }
 
-
+if (process.env.predeploy == "true"){
+    logger.info("Predeployment enabled, deploying...")
+    deployment(process.env.path_to_deployment_script)
+}
 app.post("/webhook", async (req, res) => {
-    console.log("got POST");
+    logger.info("Received webhook POST request");
 
     try {
         const body = req.body
         const signatureHeader = req.headers["x-hub-signature-256"];
+        const eventType = req.headers["x-github-event"];
+        const delivery = req.headers["x-github-delivery"];
 
+        if (delivery && Array.isArray(db.seenDeliveries) && db.seenDeliveries.includes(delivery)){
+            logger.warn("Duplicated POST request, suspected replay attack");
+            return res.status(409).send("Replay detected");
+        }
+        // Checks if signature is missing
         if (!signatureHeader || !signatureHeader.startsWith("sha256=")) {
+            logger.warn("Missing or invalid signature header");
             return res.status(400).send("Missing or invalid signature header");
         }
-
+        // Remove the 'sha256=' part
         const hash = signatureHeader.substring(7);
 
         // Check if the hash matches
         if (await checkKey(process.env.secret, body, hash)){
-            await deployment(process.env.path_to_deployment_script)
+            if (delivery) {
+                db.seenDeliveries.push(delivery);
+                persistDB(DB_PATH, db);
+            }
+
+            if (eventType == "push"){
+                logger.info("Webhook signature valid, triggering deployment");
+                await deployment(process.env.path_to_deployment_script);
+                logger.info("Deployment completed successfully");
+            } else {
+                logger.info("HASH matches but event type is not 'push', not deployed")
+            }
             return res.send("OK")
         }
 
+        logger.warn("Invalid webhook signature");
         return res.status(401).send("Invalid signature")
     } catch (error) {
-        console.error(error);
+        logger.error(error, "Unhandled webhook error");
         return res.status(500).send("Internal server error");
     }
 })
 
 app.listen(process.env.port, () => {
-    console.log(`Server running on port ${process.env.port}`)
+    logger.info({ port: process.env.port }, "Server started")
 })
