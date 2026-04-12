@@ -4,7 +4,6 @@ port=9000
 # Endpoint to listen for the POST request that github sends
 # Must be the same as on Github (check docs)
 endpoint="/webhook"
-
 # Path to the script
 # WARN: MUST BE EXECUTABLE (chmod +x /path/to/executable.sh)
 # WARN: Give absolute path (/path/to/executable.sh instead of ../relative/path/to/executable.sh)

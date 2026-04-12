@@ -44,3 +44,5 @@ Thumbs.db
 # lock files (optional choice)
 # package-lock.json
 # yarn.lock
+
+*.conf
