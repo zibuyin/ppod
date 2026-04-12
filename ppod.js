@@ -157,7 +157,7 @@ async function deployment(pathToScript) {
     });
 }
 
-app.post("/webhook", async (req, res) => {
+app.post(process.env.endpoint, async (req, res) => {
     logger.info("Received webhook POST request");
 
     try {
@@ -187,12 +187,13 @@ app.post("/webhook", async (req, res) => {
 
             if (eventType == "push"){
                 logger.info("Webhook signature valid, triggering deployment");
-                await deployment(process.env.path_to_deployment_script);
+                deployment(process.env.path_to_deployment_script);
                 logger.info("Deployment completed successfully");
             } else {
                 logger.info("HASH matches but event type is not 'push', not deployed")
+                return res.send("OK")
             }
-            return res.send("OK")
+            
         }
 
         logger.warn("Invalid webhook signature");
