@@ -191,8 +191,9 @@ app.post(process.env.endpoint, async (req, res) => {
                 logger.info("Deployment completed successfully");
             } else {
                 logger.info("HASH matches but event type is not 'push', not deployed")
-                return res.send("OK")
+                
             }
+            return res.send("OK")
             
         }
 
