@@ -3,14 +3,31 @@ const app = express();
 const { exec } = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs")
+// const { initApp, initializeLogPath }= require("./init.js")
+
+const CONFIG_PATH = "./ppod.conf";
+const DEFAULT_LOG_PATH = "./log/ppod.log";
 
 // TODO: Replace with log file
 const pino = require("pino")
-const logger = pino({
-    formatters: {
-        level: (label) => ({ level: label.toUpperCase() })
-    }
-})
+
+function createLogger(logPath) {
+    return pino(
+        {
+            formatters: {
+                level: (label) => ({ level: label.toUpperCase() })
+            }
+        },
+        pino.destination({
+            dest: logPath,
+            sync: true
+        })
+    );
+}
+
+
+
+
 
 // TODO:
 // 1. Set whitelist for github IP
@@ -27,16 +44,37 @@ function die(deathMessage){
 }
 // Load config
 function loadConfig(configPath){
+    configPath = "./ppod.conf" //REMOVE IN PRODUCTION
     try{
-        process.loadEnvFile(configPath)
+        if (fs.existsSync(configPath)){
+            process.loadEnvFile(configPath)
+        }
+        // Generate a default config if not found
+        // else {
+        //     fs.readFile('./ppod.conf.template', 'utf8', (err, data) => {
+        //         if (err) {
+        //             console.error(err);
+        //             return;
+        //         }
+        //         // fs.mkdirSync("/etc/ppod/")
+        //         fs.writeFileSync(configPath, data, (err) => {
+        //         if(err){
+        //             console.log(err)
+        //         }
+        //     })
+                    
+        //     });
+            
+        // }
+       
     }
     catch(error){
-        logger.fatal(error, "Missing config file")
-        die("Missing config file")
+        logger.fatal(error, "Error loading config")
+        die(`Error loading config: ${error}`)
     }
     
 }
-loadConfig('./ppod.conf')
+
 // Load seen deliveries
 function loadDB(DBPath){
     try{
@@ -49,9 +87,18 @@ function loadDB(DBPath){
     }
 }
 
+
+// INIT
+const logger = createLogger("./log/ppod.log")
+
 const DB_PATH = "./db.json";
 const db = loadDB(DB_PATH)
 
+// loadConfig("/etc/ppod/ppod.conf")
+loadConfig("./ppod.conf")
+
+
+// END OF INIT
 if (!Array.isArray(db.seenDeliveries)) {
     db.seenDeliveries = [];
 }
@@ -106,10 +153,6 @@ async function deployment(pathToScript) {
     });
 }
 
-if (process.env.predeploy == "true"){
-    logger.info("Predeployment enabled, deploying...")
-    deployment(process.env.path_to_deployment_script)
-}
 app.post("/webhook", async (req, res) => {
     logger.info("Received webhook POST request");
 
@@ -119,7 +162,7 @@ app.post("/webhook", async (req, res) => {
         const eventType = req.headers["x-github-event"];
         const delivery = req.headers["x-github-delivery"];
 
-        if (delivery && Array.isArray(db.seenDeliveries) && db.seenDeliveries.includes(delivery)){
+        if (delivery && Array.isArray(db.seenDeliveries) && db.seenDeliveries.includes(delivery) && process.env.ignoreReplay == "false"){
             logger.warn("Duplicated POST request, suspected replay attack");
             return res.status(409).send("Replay detected");
         }
@@ -133,7 +176,7 @@ app.post("/webhook", async (req, res) => {
 
         // Check if the hash matches
         if (await checkKey(process.env.secret, body, hash)){
-            if (delivery) {
+            if (delivery && process.env.ignoreReplay == "false") {
                 db.seenDeliveries.push(delivery);
                 persistDB(DB_PATH, db);
             }
@@ -155,6 +198,38 @@ app.post("/webhook", async (req, res) => {
         return res.status(500).send("Internal server error");
     }
 })
+
+// async function bootstrap() {
+//     // If config is missing, run interactive init and wait for completion.
+//     let initializedLogPath = DEFAULT_LOG_PATH;
+//     if (!fs.existsSync(CONFIG_PATH)){
+//         console.log("Config file not found, starting init")
+//         initializedLogPath = await initApp();
+//     } else {
+//         initializedLogPath = initializeLogPath(DEFAULT_LOG_PATH);
+//     }
+
+//     logger = createLogger(initializedLogPath);
+
+//     loadConfig(CONFIG_PATH)
+
+//     if (process.env.predeploy == "true"){
+//         logger.info("Predeployment enabled, deploying...")
+//         await deployment(process.env.path_to_deployment_script)
+//     }
+
+//     app.listen(process.env.port, () => {
+//         logger.info({ port: process.env.port }, "Server started")
+//     })
+// }
+
+// bootstrap().catch((error) => {
+//     logger.fatal(error, "Startup failed");
+//     process.exit(1);
+// });
+
+
+
 
 app.listen(process.env.port, () => {
     logger.info({ port: process.env.port }, "Server started")
