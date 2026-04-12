@@ -12,6 +12,10 @@ const DEFAULT_LOG_PATH = "./log/ppod.log";
 const pino = require("pino")
 
 function createLogger(logPath) {
+    if (!fs.existsSync(logPath)){
+        fs.mkdirSync("./logs")
+        fs.writeFileSync(logPath,"")
+    }
     return pino(
         {
             formatters: {
@@ -89,7 +93,7 @@ function loadDB(DBPath){
 
 
 // INIT
-const logger = createLogger("./log/ppod.log")
+const logger = createLogger("./logs/ppod.log")
 
 const DB_PATH = "./db.json";
 const db = loadDB(DB_PATH)
@@ -199,38 +203,11 @@ app.post("/webhook", async (req, res) => {
     }
 })
 
-// async function bootstrap() {
-//     // If config is missing, run interactive init and wait for completion.
-//     let initializedLogPath = DEFAULT_LOG_PATH;
-//     if (!fs.existsSync(CONFIG_PATH)){
-//         console.log("Config file not found, starting init")
-//         initializedLogPath = await initApp();
-//     } else {
-//         initializedLogPath = initializeLogPath(DEFAULT_LOG_PATH);
-//     }
-
-//     logger = createLogger(initializedLogPath);
-
-//     loadConfig(CONFIG_PATH)
-
-//     if (process.env.predeploy == "true"){
-//         logger.info("Predeployment enabled, deploying...")
-//         await deployment(process.env.path_to_deployment_script)
-//     }
-
-//     app.listen(process.env.port, () => {
-//         logger.info({ port: process.env.port }, "Server started")
-//     })
-// }
-
-// bootstrap().catch((error) => {
-//     logger.fatal(error, "Startup failed");
-//     process.exit(1);
-// });
 
 
 
 
 app.listen(process.env.port, () => {
+    console.log(`PPOD started on port ${process.env.port}`)
     logger.info({ port: process.env.port }, "Server started")
 })
