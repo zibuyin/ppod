@@ -157,6 +157,14 @@ async function deployment(pathToScript) {
     });
 }
 
+app.get("/health", (req, res) => {
+    return res.status(200).send("OK");
+});
+
+app.head("/health", (req, res) => {
+    return res.sendStatus(200);
+});
+
 app.post(process.env.endpoint, async (req, res) => {
     logger.info("Received webhook POST request");
 
@@ -165,7 +173,6 @@ app.post(process.env.endpoint, async (req, res) => {
         const signatureHeader = req.headers["x-hub-signature-256"];
         const eventType = req.headers["x-github-event"];
         const delivery = req.headers["x-github-delivery"];
-
         if (delivery && Array.isArray(db.seenDeliveries) && db.seenDeliveries.includes(delivery) && process.env.ignoreReplay == "false"){
             logger.warn("Duplicated POST request, suspected replay attack");
             return res.status(409).send("Replay detected");
